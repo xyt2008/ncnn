@@ -20,58 +20,51 @@ DEFINE_LAYER_CREATOR(MemoryData)
 
 MemoryData::MemoryData()
 {
-    one_blob_only = true;
-    support_inplace = true;
+    one_blob_only = false;
+    support_inplace = false;
 }
 
-#if NCNN_STDIO
-#if NCNN_STRING
-int MemoryData::load_param(FILE* paramfp)
+int MemoryData::load_param(const ParamDict& pd)
 {
-    int nscan = fscanf(paramfp, "%d %d %d",
-                       &channels, &width, &height);
-    if (nscan != 3)
+    w = pd.get(0, 0);
+    h = pd.get(1, 0);
+    c = pd.get(2, 0);
+
+    return 0;
+}
+
+int MemoryData::load_model(const ModelBin& mb)
+{
+    if (c != 0)
     {
-        fprintf(stderr, "MemoryData load_param failed %d\n", nscan);
-        return -1;
+        data = mb.load(w, h, c, 1);
     }
-
-    return 0;
-}
-#endif // NCNN_STRING
-int MemoryData::load_param_bin(FILE* paramfp)
-{
-    fread(&channels, sizeof(int), 1, paramfp);
-
-    fread(&width, sizeof(int), 1, paramfp);
-
-    fread(&height, sizeof(int), 1, paramfp);
-
-    return 0;
-}
-#endif // NCNN_STDIO
-
-int MemoryData::load_param(const unsigned char*& mem)
-{
-    channels = *(int*)(mem);
-    mem += 4;
-
-    width = *(int*)(mem);
-    mem += 4;
-
-    height = *(int*)(mem);
-    mem += 4;
+    else if (h != 0)
+    {
+        data = mb.load(w, h, 1);
+    }
+    else if (w != 0)
+    {
+        data = mb.load(w, 1);
+    }
+    else // 0 0 0
+    {
+        data.create(1);
+    }
+    if (data.empty())
+        return -100;
 
     return 0;
 }
 
-int MemoryData::forward(const Mat& /*bottom_blob*/, Mat& /*top_blob*/) const
+int MemoryData::forward(const std::vector<Mat>& /*bottom_blobs*/, std::vector<Mat>& top_blobs, const Option& opt) const
 {
-    return 0;
-}
+    Mat& top_blob = top_blobs[0];
 
-int MemoryData::forward_inplace(Mat& /*bottom_top_blob*/) const
-{
+    top_blob = data.clone(opt.blob_allocator);
+    if (top_blob.empty())
+        return -100;
+
     return 0;
 }
 

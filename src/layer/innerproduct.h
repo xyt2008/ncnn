@@ -23,19 +23,13 @@ class InnerProduct : public Layer
 {
 public:
     InnerProduct();
-    virtual ~InnerProduct();
+    ~InnerProduct();
 
-#if NCNN_STDIO
-#if NCNN_STRING
-    virtual int load_param(FILE* paramfp);
-#endif // NCNN_STRING
-    virtual int load_param_bin(FILE* paramfp);
-    virtual int load_model(FILE* binfp);
-#endif // NCNN_STDIO
-    virtual int load_param(const unsigned char*& mem);
-    virtual int load_model(const unsigned char*& mem);
+    virtual int load_param(const ParamDict& pd);
 
-    virtual int forward(const Mat& bottom_blob, Mat& top_blob) const;
+    virtual int load_model(const ModelBin& mb);
+
+    virtual int forward(const Mat& bottom_blob, Mat& top_blob, const Option& opt) const;
 
 public:
     // param
@@ -44,9 +38,19 @@ public:
 
     int weight_data_size;
 
+    int int8_scale_term;
+
     // model
     Mat weight_data;
     Mat bias_data;
+
+    float weight_data_int8_scale;
+    float bottom_blob_int8_scale;
+
+    bool use_int8_inference;
+
+    ncnn::Layer* quantize;
+    ncnn::Layer* dequantize;
 };
 
 } // namespace ncnn

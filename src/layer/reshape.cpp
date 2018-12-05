@@ -24,59 +24,12 @@ Reshape::Reshape()
     support_inplace = false;
 }
 
-#if NCNN_STDIO
-#if NCNN_STRING
-int Reshape::load_param(FILE* paramfp)
+int Reshape::load_param(const ParamDict& pd)
 {
-    int nscan = fscanf(paramfp, "%d %d %d",
-                       &w, &h, &c);
-    if (nscan != 3)
-    {
-        fprintf(stderr, "Reshape load_param failed %d\n", nscan);
-        return -1;
-    }
-
-    ndim = 3;
-    if (c == -233)
-        ndim = 2;
-    if (h == -233)
-        ndim = 1;
-    if (w == -233)
-        ndim = 0;
-
-    return 0;
-}
-#endif // NCNN_STRING
-int Reshape::load_param_bin(FILE* paramfp)
-{
-    fread(&w, sizeof(int), 1, paramfp);
-
-    fread(&h, sizeof(int), 1, paramfp);
-
-    fread(&c, sizeof(int), 1, paramfp);
-
-    ndim = 3;
-    if (c == -233)
-        ndim = 2;
-    if (h == -233)
-        ndim = 1;
-    if (w == -233)
-        ndim = 0;
-
-    return 0;
-}
-#endif // NCNN_STDIO
-
-int Reshape::load_param(const unsigned char*& mem)
-{
-    w = *(int*)(mem);
-    mem += 4;
-
-    h = *(int*)(mem);
-    mem += 4;
-
-    c = *(int*)(mem);
-    mem += 4;
+    w = pd.get(0, -233);
+    h = pd.get(1, -233);
+    c = pd.get(2, -233);
+    permute = pd.get(3, 0);
 
     ndim = 3;
     if (c == -233)
@@ -89,9 +42,10 @@ int Reshape::load_param(const unsigned char*& mem)
     return 0;
 }
 
-int Reshape::forward(const Mat& bottom_blob, Mat& top_blob) const
+int Reshape::forward(const Mat& bottom_blob, Mat& top_blob, const Option& opt) const
 {
-    int total = bottom_blob.total();
+    size_t elemsize = bottom_blob.elemsize;
+    int total = bottom_blob.w * bottom_blob.h * bottom_blob.c;
 
     if (ndim == 1)
     {
@@ -103,7 +57,30 @@ int Reshape::forward(const Mat& bottom_blob, Mat& top_blob) const
         if (_w == -1)
             _w = total;
 
-        top_blob = bottom_blob.reshape(_w);
+        if (permute == 1)
+        {
+            top_blob.create(_w, elemsize, opt.blob_allocator);
+            if (top_blob.empty())
+                return -100;
+
+            // c-h-w to h-w-c
+            float* ptr = top_blob;
+            for (int i=0; i<bottom_blob.h; i++)
+            {
+                for (int j=0; j<bottom_blob.w; j++)
+                {
+                    for (int p=0; p<bottom_blob.c; p++)
+                    {
+                        const float* bptr = bottom_blob.channel(p);
+                        *ptr++ = bptr[i*bottom_blob.w + j];
+                    }
+                }
+            }
+        }
+        else
+        {
+            top_blob = bottom_blob.reshape(_w, opt.blob_allocator);
+        }
     }
     else if (ndim == 2)
     {
@@ -120,7 +97,7 @@ int Reshape::forward(const Mat& bottom_blob, Mat& top_blob) const
         if (_h == -1)
             _h = total / _w;
 
-        top_blob = bottom_blob.reshape(_w, _h);
+        top_blob = bottom_blob.reshape(_w, _h, opt.blob_allocator);
     }
     else if (ndim == 3)
     {
@@ -142,8 +119,11 @@ int Reshape::forward(const Mat& bottom_blob, Mat& top_blob) const
         if (_c == -1)
             _c = total / _h / _w;
 
-        top_blob = bottom_blob.reshape(_w, _h, _c);
+        top_blob = bottom_blob.reshape(_w, _h, _c, opt.blob_allocator);
     }
+
+    if (top_blob.empty())
+        return -100;
 
     return 0;
 }

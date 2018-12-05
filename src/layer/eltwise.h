@@ -24,22 +24,15 @@ class Eltwise : public Layer
 public:
     Eltwise();
 
-#if NCNN_STDIO
-#if NCNN_STRING
-    virtual int load_param(FILE* paramfp);
-#endif // NCNN_STRING
-    virtual int load_param_bin(FILE* paramfp);
-#endif // NCNN_STDIO
-    virtual int load_param(const unsigned char*& mem);
+    virtual int load_param(const ParamDict& pd);
 
-    virtual int forward(const std::vector<Mat>& bottom_blobs, std::vector<Mat>& top_blobs) const;
+    virtual int forward(const std::vector<Mat>& bottom_blobs, std::vector<Mat>& top_blobs, const Option& opt) const;
 
     enum { Operation_PROD = 0, Operation_SUM = 1, Operation_MAX = 2 };
 
 public:
     // param
     int op_type;
-    int num_coeff;
     Mat coeffs;
 };
 

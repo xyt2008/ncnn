@@ -24,15 +24,9 @@ class SPP : public Layer
 public:
     SPP();
 
-#if NCNN_STDIO
-#if NCNN_STRING
-    virtual int load_param(FILE* paramfp);
-#endif // NCNN_STRING
-    virtual int load_param_bin(FILE* paramfp);
-#endif // NCNN_STDIO
-    virtual int load_param(const unsigned char*& mem);
+    virtual int load_param(const ParamDict& pd);
 
-    virtual int forward(const Mat& bottom_blob, Mat& top_blob) const;
+    virtual int forward(const Mat& bottom_blob, Mat& top_blob, const Option& opt) const;
 
     enum { PoolMethod_MAX = 0, PoolMethod_AVE = 1 };
 

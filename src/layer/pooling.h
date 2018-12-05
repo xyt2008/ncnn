@@ -24,25 +24,25 @@ class Pooling : public Layer
 public:
     Pooling();
 
-#if NCNN_STDIO
-#if NCNN_STRING
-    virtual int load_param(FILE* paramfp);
-#endif // NCNN_STRING
-    virtual int load_param_bin(FILE* paramfp);
-#endif // NCNN_STDIO
-    virtual int load_param(const unsigned char*& mem);
+    virtual int load_param(const ParamDict& pd);
 
-    virtual int forward(const Mat& bottom_blob, Mat& top_blob) const;
+    virtual int forward(const Mat& bottom_blob, Mat& top_blob, const Option& opt) const;
 
     enum { PoolMethod_MAX = 0, PoolMethod_AVE = 1 };
 
 public:
     // param
     int pooling_type;
-    int kernel_size;
-    int stride;
-    int pad;
+    int kernel_w;
+    int kernel_h;
+    int stride_w;
+    int stride_h;
+    int pad_left;
+    int pad_right;
+    int pad_top;
+    int pad_bottom;
     int global_pooling;
+    int pad_mode;// 0=full 1=valid 2=SAME
 };
 
 } // namespace ncnn

@@ -14,6 +14,7 @@
 
 #include "spp.h"
 #include <math.h>
+#include <algorithm>
 
 namespace ncnn {
 
@@ -25,47 +26,21 @@ SPP::SPP()
     support_inplace = false;
 }
 
-#if NCNN_STDIO
-#if NCNN_STRING
-int SPP::load_param(FILE* paramfp)
+int SPP::load_param(const ParamDict& pd)
 {
-    int nscan = fscanf(paramfp, "%d %d",
-                       &pooling_type, &pyramid_height);
-    if (nscan != 2)
-    {
-        fprintf(stderr, "SPP load_param failed %d\n", nscan);
-        return -1;
-    }
-
-    return 0;
-}
-#endif // NCNN_STRING
-int SPP::load_param_bin(FILE* paramfp)
-{
-    fread(&pooling_type, sizeof(int), 1, paramfp);
-
-    fread(&pyramid_height, sizeof(int), 1, paramfp);
-
-    return 0;
-}
-#endif // NCNN_STDIO
-
-int SPP::load_param(const unsigned char*& mem)
-{
-    pooling_type = *(int*)(mem);
-    mem += 4;
-
-    pyramid_height = *(int*)(mem);
-    mem += 4;
+    pooling_type = pd.get(0, 0);
+    pyramid_height = pd.get(1, 1);
 
     return 0;
 }
 
-int SPP::forward(const Mat& bottom_blob, Mat& top_blob) const
+int SPP::forward(const Mat& bottom_blob, Mat& top_blob, const Option& opt) const
 {
+    size_t elemsize = bottom_blob.elemsize;
+
     // 1 + 4 + 16 + 64 + ... + (2*pyramid_height)^2
     int pyramid_num_bins = ((1 << (pyramid_height * 2)) - 1) / 3;
-    top_blob.create(pyramid_num_bins, 1, 2);
+    top_blob.create(pyramid_num_bins, 1, 2, elemsize, opt.blob_allocator);
     if (top_blob.empty())
         return -100;
 
@@ -99,7 +74,7 @@ int SPP::forward(const Mat& bottom_blob, Mat& top_blob) const
         Mat bottom_blob_bordered = bottom_blob;
         if (pad_h > 0 || pad_w > 0)
         {
-            copy_make_border(bottom_blob, bottom_blob_bordered, pad_h, pad_h, pad_w, pad_w, BORDER_CONSTANT, 0.f);
+            copy_make_border(bottom_blob, bottom_blob_bordered, pad_h, pad_h, pad_w, pad_w, BORDER_CONSTANT, 0.f, opt.workspace_allocator, opt.num_threads);
             if (bottom_blob_bordered.empty())
                 return -100;
 
@@ -130,7 +105,7 @@ int SPP::forward(const Mat& bottom_blob, Mat& top_blob) const
 
         if (pooling_type == PoolMethod_MAX)
         {
-            #pragma omp parallel for
+            #pragma omp parallel for num_threads(opt.num_threads)
             for (int q=0; q<channels; q++)
             {
                 const Mat m(w, h, bottom_blob_bordered.channel(q));
@@ -140,7 +115,7 @@ int SPP::forward(const Mat& bottom_blob, Mat& top_blob) const
                 {
                     for (int j = 0; j < outw; j++)
                     {
-                        const float* sptr = m.data + m.w * i*stride_h + j*stride_w;
+                        const float* sptr = m.row(i*stride_h) + j*stride_w;
 
                         float max = sptr[0];
 
@@ -159,7 +134,7 @@ int SPP::forward(const Mat& bottom_blob, Mat& top_blob) const
         }
         else if (pooling_type == PoolMethod_AVE)
         {
-            #pragma omp parallel for
+            #pragma omp parallel for num_threads(opt.num_threads)
             for (int q=0; q<channels; q++)
             {
                 const Mat m(w, h, bottom_blob_bordered.channel(q));
@@ -169,7 +144,7 @@ int SPP::forward(const Mat& bottom_blob, Mat& top_blob) const
                 {
                     for (int j = 0; j < outw; j++)
                     {
-                        const float* sptr = m.data + m.w * i*stride_h + j*stride_w;
+                        const float* sptr = m.row(i*stride_h) + j*stride_w;
 
                         float sum = 0;
 

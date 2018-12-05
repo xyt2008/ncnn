@@ -24,57 +24,31 @@ Tile::Tile()
     support_inplace = false;
 }
 
-#if NCNN_STDIO
-#if NCNN_STRING
-int Tile::load_param(FILE* paramfp)
+int Tile::load_param(const ParamDict& pd)
 {
-    int nscan = fscanf(paramfp, "%d %d", &dim, &tiles);
-    if (nscan != 2)
-    {
-        fprintf(stderr, "Tile load_param failed %d\n", nscan);
-        return -1;
-    }
-
-    return 0;
-}
-#endif // NCNN_STRING
-int Tile::load_param_bin(FILE* paramfp)
-{
-    fread(&dim, sizeof(int), 1, paramfp);
-
-    fread(&tiles, sizeof(int), 1, paramfp);
-
-    return 0;
-}
-#endif // NCNN_STDIO
-
-int Tile::load_param(const unsigned char*& mem)
-{
-    dim = *(int*)(mem);
-    mem += 4;
-
-    tiles = *(int*)(mem);
-    mem += 4;
+    dim = pd.get(0, 0);
+    tiles = pd.get(1, 1);
 
     return 0;
 }
 
-int Tile::forward(const Mat& bottom_blob, Mat& top_blob) const
+int Tile::forward(const Mat& bottom_blob, Mat& top_blob, const Option& opt) const
 {
     int w = bottom_blob.w;
     int h = bottom_blob.h;
     int channels = bottom_blob.c;
+    size_t elemsize = bottom_blob.elemsize;
 
     if (dim == 0)
     {
-        top_blob.create(w, h, channels * tiles);
+        top_blob.create(w, h, channels * tiles, elemsize, opt.blob_allocator);
         if (top_blob.empty())
             return -100;
 
         const float* ptr = bottom_blob;
         int size = bottom_blob.cstep * channels;
 
-        #pragma omp parallel for
+        #pragma omp parallel for num_threads(opt.num_threads)
         for (int p=0; p<tiles; p++)
         {
             float* outptr = top_blob.channel(p * channels);
@@ -87,13 +61,13 @@ int Tile::forward(const Mat& bottom_blob, Mat& top_blob) const
     }
     else if (dim == 1)
     {
-        top_blob.create(w, h * tiles, channels);
+        top_blob.create(w, h * tiles, channels, elemsize, opt.blob_allocator);
         if (top_blob.empty())
             return -100;
 
         int size = w * h;
 
-        #pragma omp parallel for
+        #pragma omp parallel for num_threads(opt.num_threads)
         for (int q=0; q<channels; q++)
         {
             const float* ptr = bottom_blob.channel(q);
@@ -112,11 +86,11 @@ int Tile::forward(const Mat& bottom_blob, Mat& top_blob) const
     }
     else if (dim == 2)
     {
-        top_blob.create(w * tiles, h, channels);
+        top_blob.create(w * tiles, h, channels, elemsize, opt.blob_allocator);
         if (top_blob.empty())
             return -100;
 
-        #pragma omp parallel for
+        #pragma omp parallel for num_threads(opt.num_threads)
         for (int q=0; q<channels; q++)
         {
             const float* ptr = bottom_blob.channel(q);

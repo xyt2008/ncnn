@@ -24,17 +24,9 @@ class Exp : public Layer
 public:
     Exp();
 
-#if NCNN_STDIO
-#if NCNN_STRING
-    virtual int load_param(FILE* paramfp);
-#endif // NCNN_STRING
-    virtual int load_param_bin(FILE* paramfp);
-#endif // NCNN_STDIO
-    virtual int load_param(const unsigned char*& mem);
+    virtual int load_param(const ParamDict& pd);
 
-    virtual int forward(const Mat& bottom_blob, Mat& top_blob) const;
-
-    virtual int forward_inplace(Mat& bottom_top_blob) const;
+    virtual int forward_inplace(Mat& bottom_top_blob, const Option& opt) const;
 
 public:
     float base;

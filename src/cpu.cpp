@@ -15,6 +15,7 @@
 #include "cpu.h"
 
 #include <stdio.h>
+#include <string.h>
 #include <vector>
 
 #ifdef _OPENMP
@@ -24,6 +25,7 @@
 #ifdef __ANDROID__
 #include <sys/syscall.h>
 #include <unistd.h>
+#include <stdint.h>
 #endif
 
 #if __APPLE__
@@ -51,8 +53,13 @@ static unsigned int get_elf_hwcap_from_proc_self_auxv()
 
 #define AT_HWCAP 16
 #define AT_HWCAP2 26
+#if __aarch64__
 
+    struct { uint64_t tag; uint64_t value; } entry;
+#else
     struct { unsigned int tag; unsigned int value; } entry;
+
+#endif
 
     unsigned int result = 0;
     while (!feof(fp))
@@ -91,6 +98,14 @@ static unsigned int g_hwcaps = get_elf_hwcap_from_proc_self_auxv();
 #endif // __ANDROID__
 
 #if __IOS__
+static unsigned int get_hw_cpufamily()
+{
+    unsigned int value = 0;
+    size_t len = sizeof(value);
+    sysctlbyname("hw.cpufamily", &value, &len, NULL, 0);
+    return value;
+}
+
 static cpu_type_t get_hw_cputype()
 {
     cpu_type_t value = 0;
@@ -107,6 +122,7 @@ static cpu_subtype_t get_hw_cpusubtype()
     return value;
 }
 
+static unsigned int g_hw_cpufamily = get_hw_cpufamily();
 static cpu_type_t g_hw_cputype = get_hw_cputype();
 static cpu_subtype_t g_hw_cpusubtype = get_hw_cpusubtype();
 #endif // __IOS__
@@ -160,7 +176,13 @@ int cpu_support_arm_asimdhp()
 #endif
 #elif __IOS__
 #if __aarch64__
-    return 0;
+#ifndef CPUFAMILY_ARM_HURRICANE
+#define CPUFAMILY_ARM_HURRICANE 0x67ceee93
+#endif
+#ifndef CPUFAMILY_ARM_MONSOON_MISTRAL
+#define CPUFAMILY_ARM_MONSOON_MISTRAL 0xe81e7ef6
+#endif
+    return g_hw_cpufamily == CPUFAMILY_ARM_HURRICANE || g_hw_cpufamily == CPUFAMILY_ARM_MONSOON_MISTRAL;
 #else
     return 0;
 #endif
@@ -207,7 +229,11 @@ static int get_cpucount()
 
     return count;
 #else
+#ifdef _OPENMP
+    return omp_get_max_threads();
+#else
     return 1;
+#endif // _OPENMP
 #endif
 }
 
@@ -221,13 +247,35 @@ int get_cpu_count()
 #ifdef __ANDROID__
 static int get_max_freq_khz(int cpuid)
 {
+    // first try, for all possible cpu
     char path[256];
     sprintf(path, "/sys/devices/system/cpu/cpufreq/stats/cpu%d/time_in_state", cpuid);
 
     FILE* fp = fopen(path, "rb");
 
     if (!fp)
-        return -1;
+    {
+        // second try, for online cpu
+        sprintf(path, "/sys/devices/system/cpu/cpu%d/cpufreq/stats/time_in_state", cpuid);
+        fp = fopen(path, "rb");
+
+        if (!fp)
+        {
+            // third try, for online cpu
+            sprintf(path, "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", cpuid);
+            fp = fopen(path, "rb");
+
+            if (!fp)
+                return -1;
+
+            int max_freq_khz = -1;
+            fscanf(fp, "%d", &max_freq_khz);
+
+            fclose(fp);
+
+            return max_freq_khz;
+        }
+    }
 
     int max_freq_khz = 0;
     while (!feof(fp))
@@ -264,8 +312,15 @@ typedef struct
   memset((cpusetp), 0, sizeof(cpu_set_t))
 
     // set affinity for thread
+#ifdef __GLIBC__
+    pid_t pid = syscall(SYS_gettid);
+#else
+#ifdef PI3
+    pid_t pid = getpid();
+#else
     pid_t pid = gettid();
-
+#endif
+#endif
     cpu_set_t mask;
     CPU_ZERO(&mask);
     for (int i=0; i<(int)cpuids.size(); i++)
@@ -369,10 +424,10 @@ int set_cpu_powersave(int powersave)
         sort_cpuid_by_max_frequency(sorted_cpuids, &little_cluster_offset);
     }
 
-    if (little_cluster_offset == 0)
+    if (little_cluster_offset == 0 && powersave != 0)
     {
+        powersave = 0;
         fprintf(stderr, "SMP cpu powersave not supported\n");
-        return -1;
     }
 
     // prepare affinity cpuid
@@ -387,7 +442,7 @@ int set_cpu_powersave(int powersave)
     }
     else if (powersave == 2)
     {
-        cpuids = std::vector<int>(sorted_cpuids.begin(), sorted_cpuids.begin() +  + little_cluster_offset);
+        cpuids = std::vector<int>(sorted_cpuids.begin(), sorted_cpuids.begin() + little_cluster_offset);
     }
     else
     {
@@ -428,6 +483,7 @@ int set_cpu_powersave(int powersave)
     return -1;
 #else
     // TODO
+    (void) powersave;  // Avoid unused parameter warning.
     return -1;
 #endif
 }

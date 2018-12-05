@@ -24,17 +24,9 @@ class LRN : public Layer
 public:
     LRN();
 
-#if NCNN_STDIO
-#if NCNN_STRING
-    virtual int load_param(FILE* paramfp);
-#endif // NCNN_STRING
-    virtual int load_param_bin(FILE* paramfp);
-#endif // NCNN_STDIO
-    virtual int load_param(const unsigned char*& mem);
+    virtual int load_param(const ParamDict& pd);
 
-    virtual int forward(const Mat& bottom_blob, Mat& top_blob) const;
-
-    virtual int forward_inplace(Mat& bottom_top_blob) const;
+    virtual int forward_inplace(Mat& bottom_top_blob, const Option& opt) const;
 
     enum { NormRegion_ACROSS_CHANNELS = 0, NormRegion_WITHIN_CHANNEL = 1 };
 
@@ -44,6 +36,7 @@ public:
     int local_size;
     float alpha;
     float beta;
+    float bias;
 };
 
 } // namespace ncnn

@@ -15,6 +15,7 @@
 #include "softmax.h"
 #include <float.h>
 #include <math.h>
+#include <algorithm>
 
 namespace ncnn {
 
@@ -26,146 +27,415 @@ Softmax::Softmax()
     support_inplace = true;
 }
 
-int Softmax::forward(const Mat& bottom_blob, Mat& top_blob) const
+int Softmax::load_param(const ParamDict& pd)
 {
-    // value = exp( value - global max value )
-    // sum all value
-    // value = value / sum
-
-    int w = bottom_blob.w;
-    int h = bottom_blob.h;
-    int channels = bottom_blob.c;
-    int size = w * h;
-
-    top_blob.create(w, h, channels);
-    if (top_blob.empty())
-        return -100;
-
-    Mat max;
-    max.create(w, h);
-    if (max.empty())
-        return -100;
-    max.fill(-FLT_MAX);
-    for (int q=0; q<channels; q++)
-    {
-        const float* ptr = bottom_blob.channel(q);
-        float* maxptr = max;
-
-        for (int i=0; i<size; i++)
-        {
-            maxptr[i] = std::max(maxptr[i], ptr[i]);
-        }
-    }
-
-    #pragma omp parallel for
-    for (int q=0; q<channels; q++)
-    {
-        const float* ptr = bottom_blob.channel(q);
-        float* outptr = top_blob.channel(q);
-        float* maxptr = max;
-
-        for (int i=0; i<size; i++)
-        {
-            outptr[i] = exp(ptr[i] - maxptr[i]);
-        }
-    }
-
-    Mat sum;
-    sum.create(w, h);
-    if (sum.empty())
-        return -100;
-    sum.fill(0.f);
-    for (int q=0; q<channels; q++)
-    {
-        const float* outptr = top_blob.channel(q);
-        float* sumptr = sum;
-
-        for (int i=0; i<size; i++)
-        {
-            sumptr[i] += outptr[i];
-        }
-    }
-
-    #pragma omp parallel for
-    for (int q=0; q<channels; q++)
-    {
-        float* outptr = top_blob.channel(q);
-        float* sumptr = sum;
-
-        for (int i=0; i<size; i++)
-        {
-            outptr[i] /= sumptr[i];
-        }
-    }
+    axis = pd.get(0, 0);
 
     return 0;
 }
 
-int Softmax::forward_inplace(Mat& bottom_top_blob) const
+int Softmax::forward_inplace(Mat& bottom_top_blob, const Option& opt) const
 {
     // value = exp( value - global max value )
     // sum all value
     // value = value / sum
 
-    int w = bottom_top_blob.w;
-    int h = bottom_top_blob.h;
-    int channels = bottom_top_blob.c;
-    int size = w * h;
+    int dims = bottom_top_blob.dims;
+    size_t elemsize = bottom_top_blob.elemsize;
 
-    Mat max;
-    max.create(w, h);
-    if (max.empty())
-        return -100;
-    max.fill(-FLT_MAX);
-    for (int q=0; q<channels; q++)
+    if (dims == 1) // axis == 0
     {
-        float* ptr = bottom_top_blob.channel(q);
-        float* maxptr = max;
+        int w = bottom_top_blob.w;
 
-        for (int i=0; i<size; i++)
+        float* ptr = bottom_top_blob;
+
+        float max = -FLT_MAX;
+        for (int i=0; i<w; i++)
         {
-            maxptr[i] = std::max(maxptr[i], ptr[i]);
+            max = std::max(max, ptr[i]);
         }
+
+        for (int i=0; i<w; i++)
+        {
+            ptr[i] = exp(ptr[i] - max);
+        }
+
+        float sum = 0.f;
+        for (int i=0; i<w; i++)
+        {
+            sum += ptr[i];
+        }
+
+        for (int i=0; i<w; i++)
+        {
+            ptr[i] /= sum;
+        }
+
+        return 0;
     }
 
-    #pragma omp parallel for
-    for (int q=0; q<channels; q++)
+    if (dims == 2 && axis == 0)
     {
-        float* ptr = bottom_top_blob.channel(q);
-        float* maxptr = max;
+        int w = bottom_top_blob.w;
+        int h = bottom_top_blob.h;
 
-        for (int i=0; i<size; i++)
+        Mat max;
+        max.create(w, elemsize, opt.workspace_allocator);
+        if (max.empty())
+            return -100;
+        max.fill(-FLT_MAX);
+
+        for (int i=0; i<h; i++)
         {
-            ptr[i] = exp(ptr[i] - maxptr[i]);
+            const float* ptr = bottom_top_blob.row(i);
+            for (int j=0; j<w; j++)
+            {
+                max[j] = std::max(max[j], ptr[j]);
+            }
         }
+
+        for (int i=0; i<h; i++)
+        {
+            float* ptr = bottom_top_blob.row(i);
+            for (int j=0; j<w; j++)
+            {
+                ptr[j] = exp(ptr[j] - max[j]);
+            }
+        }
+
+        Mat sum;
+        sum.create(w, elemsize, opt.workspace_allocator);
+        if (sum.empty())
+            return -100;
+        sum.fill(0.f);
+
+        for (int i=0; i<h; i++)
+        {
+            const float* ptr = bottom_top_blob.row(i);
+            for (int j=0; j<w; j++)
+            {
+                sum[j] += ptr[j];
+            }
+        }
+
+        for (int i=0; i<h; i++)
+        {
+            float* ptr = bottom_top_blob.row(i);
+            for (int j=0; j<w; j++)
+            {
+                ptr[j] /= sum[j];
+            }
+        }
+
+        return 0;
     }
 
-    Mat sum;
-    sum.create(w, h);
-    if (sum.empty())
-        return -100;
-    sum.fill(0.f);
-    for (int q=0; q<channels; q++)
+    if (dims == 2 && axis == 1)
     {
-        const float* ptr = bottom_top_blob.channel(q);
-        float* sumptr = sum;
+        int w = bottom_top_blob.w;
+        int h = bottom_top_blob.h;
 
-        for (int i=0; i<size; i++)
+        Mat max;
+        max.create(h, elemsize, opt.workspace_allocator);
+        if (max.empty())
+            return -100;
+
+        for (int i=0; i<h; i++)
         {
-            sumptr[i] += ptr[i];
+            const float* ptr = bottom_top_blob.row(i);
+
+            float m = -FLT_MAX;
+            for (int j=0; j<w; j++)
+            {
+                m = std::max(m, ptr[j]);
+            }
+
+            max[i] = m;
         }
+
+        for (int i=0; i<h; i++)
+        {
+            float* ptr = bottom_top_blob.row(i);
+
+            float m = max[i];
+            for (int j=0; j<w; j++)
+            {
+                ptr[j] = exp(ptr[j] - m);
+            }
+        }
+
+        Mat sum;
+        sum.create(h, elemsize, opt.workspace_allocator);
+        if (sum.empty())
+            return -100;
+
+        for (int i=0; i<h; i++)
+        {
+            const float* ptr = bottom_top_blob.row(i);
+
+            float s = 0.f;
+            for (int j=0; j<w; j++)
+            {
+                s += ptr[j];
+            }
+
+            sum[i] = s;
+        }
+
+        for (int i=0; i<h; i++)
+        {
+            float* ptr = bottom_top_blob.row(i);
+
+            float s = sum[i];
+            for (int j=0; j<w; j++)
+            {
+                ptr[j] /= s;
+            }
+        }
+
+        return 0;
     }
 
-    #pragma omp parallel for
-    for (int q=0; q<channels; q++)
+    if (dims == 3 && axis == 0)
     {
-        float* ptr = bottom_top_blob.channel(q);
-        float* sumptr = sum;
+        int w = bottom_top_blob.w;
+        int h = bottom_top_blob.h;
+        int channels = bottom_top_blob.c;
+        int size = w * h;
 
-        for (int i=0; i<size; i++)
+        Mat max;
+        max.create(w, h, elemsize, opt.workspace_allocator);
+        if (max.empty())
+            return -100;
+        max.fill(-FLT_MAX);
+        for (int q=0; q<channels; q++)
         {
-            ptr[i] /= sumptr[i];
+            const float* ptr = bottom_top_blob.channel(q);
+
+            for (int i=0; i<size; i++)
+            {
+                max[i] = std::max(max[i], ptr[i]);
+            }
         }
+
+        #pragma omp parallel for num_threads(opt.num_threads)
+        for (int q=0; q<channels; q++)
+        {
+            float* ptr = bottom_top_blob.channel(q);
+
+            for (int i=0; i<size; i++)
+            {
+                ptr[i] = exp(ptr[i] - max[i]);
+            }
+        }
+
+        Mat sum;
+        sum.create(w, h, elemsize, opt.workspace_allocator);
+        if (sum.empty())
+            return -100;
+        sum.fill(0.f);
+        for (int q=0; q<channels; q++)
+        {
+            const float* ptr = bottom_top_blob.channel(q);
+
+            for (int i=0; i<size; i++)
+            {
+                sum[i] += ptr[i];
+            }
+        }
+
+        #pragma omp parallel for num_threads(opt.num_threads)
+        for (int q=0; q<channels; q++)
+        {
+            float* ptr = bottom_top_blob.channel(q);
+
+            for (int i=0; i<size; i++)
+            {
+                ptr[i] /= sum[i];
+            }
+        }
+
+        return 0;
+    }
+
+    if (dims == 3 && axis == 1)
+    {
+        int w = bottom_top_blob.w;
+        int h = bottom_top_blob.h;
+        int channels = bottom_top_blob.c;
+
+        Mat max;
+        max.create(h, channels, elemsize, opt.workspace_allocator);
+        if (max.empty())
+            return -100;
+        max.fill(-FLT_MAX);
+        #pragma omp parallel for num_threads(opt.num_threads)
+        for (int q=0; q<channels; q++)
+        {
+            const float* ptr = bottom_top_blob.channel(q);
+            float* maxptr = max.row(q);
+
+            for (int i=0; i<h; i++)
+            {
+                float max = -FLT_MAX;
+                for (int j=0; j<w; j++)
+                {
+                    max = std::max(max, ptr[j]);
+                }
+
+                maxptr[i] = max;
+                ptr += w;
+            }
+        }
+
+        #pragma omp parallel for num_threads(opt.num_threads)
+        for (int q=0; q<channels; q++)
+        {
+            float* ptr = bottom_top_blob.channel(q);
+            float* maxptr = max.row(q);
+
+            for (int i=0; i<h; i++)
+            {
+                float max = maxptr[i];
+                for (int j=0; j<w; j++)
+                {
+                    ptr[j] = exp(ptr[j] - max);
+                }
+
+                ptr += w;
+            }
+        }
+
+        Mat sum;
+        sum.create(h, channels, elemsize, opt.workspace_allocator);
+        if (sum.empty())
+            return -100;
+        sum.fill(0.f);
+        #pragma omp parallel for num_threads(opt.num_threads)
+        for (int q=0; q<channels; q++)
+        {
+            const float* ptr = bottom_top_blob.channel(q);
+            float* sumptr = sum.row(q);
+
+            for (int i=0; i<h; i++)
+            {
+                float sum = 0.f;
+                for (int j=0; j<w; j++)
+                {
+                    sum += ptr[j];
+                }
+
+                sumptr[i] = sum;
+                ptr += w;
+            }
+        }
+
+        #pragma omp parallel for num_threads(opt.num_threads)
+        for (int q=0; q<channels; q++)
+        {
+            float* ptr = bottom_top_blob.channel(q);
+            float* sumptr = sum.row(q);
+
+            for (int i=0; i<h; i++)
+            {
+                float sum = sumptr[i];
+                for (int j=0; j<w; j++)
+                {
+                    ptr[j] /= sum;
+                }
+
+                ptr += w;
+            }
+        }
+
+        return 0;
+    }
+
+    if (dims == 3 && axis == 2)
+    {
+        int w = bottom_top_blob.w;
+        int h = bottom_top_blob.h;
+        int channels = bottom_top_blob.c;
+
+        Mat max;
+        max.create(w, channels, elemsize, opt.workspace_allocator);
+        if (max.empty())
+            return -100;
+        max.fill(-FLT_MAX);
+        #pragma omp parallel for num_threads(opt.num_threads)
+        for (int q=0; q<channels; q++)
+        {
+            const float* ptr = bottom_top_blob.channel(q);
+            float* maxptr = max.row(q);
+
+            for (int i=0; i<h; i++)
+            {
+                for (int j=0; j<w; j++)
+                {
+                    maxptr[j] = std::max(maxptr[j], ptr[j]);
+                }
+
+                ptr += w;
+            }
+        }
+
+        #pragma omp parallel for num_threads(opt.num_threads)
+        for (int q=0; q<channels; q++)
+        {
+            float* ptr = bottom_top_blob.channel(q);
+            float* maxptr = max.row(q);
+
+            for (int i=0; i<h; i++)
+            {
+                for (int j=0; j<w; j++)
+                {
+                    ptr[j] = exp(ptr[j] - maxptr[j]);
+                }
+
+                ptr += w;
+            }
+        }
+
+        Mat sum;
+        sum.create(w, channels, elemsize, opt.workspace_allocator);
+        if (sum.empty())
+            return -100;
+        sum.fill(0.f);
+        #pragma omp parallel for num_threads(opt.num_threads)
+        for (int q=0; q<channels; q++)
+        {
+            const float* ptr = bottom_top_blob.channel(q);
+            float* sumptr = sum.row(q);
+
+            for (int i=0; i<h; i++)
+            {
+                for (int j=0; j<w; j++)
+                {
+                    sumptr[j] += ptr[j];
+                }
+
+                ptr += w;
+            }
+        }
+
+        #pragma omp parallel for num_threads(opt.num_threads)
+        for (int q=0; q<channels; q++)
+        {
+            float* ptr = bottom_top_blob.channel(q);
+            float* sumptr = sum.row(q);
+
+            for (int i=0; i<h; i++)
+            {
+                for (int j=0; j<w; j++)
+                {
+                    ptr[j] /= sumptr[j];
+                }
+
+                ptr += w;
+            }
+        }
+
+        return 0;
     }
 
     return 0;
