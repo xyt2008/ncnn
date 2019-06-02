@@ -13,6 +13,8 @@
 // specific language governing permissions and limitations under the License.
 
 #include "deconvolutiondepthwise.h"
+#include <algorithm>
+#include "layer_type.h"
 
 namespace ncnn {
 
@@ -38,6 +40,8 @@ int DeconvolutionDepthWise::load_param(const ParamDict& pd)
     bias_term = pd.get(5, 0);
     weight_data_size = pd.get(6, 0);
     group = pd.get(7, 1);
+    activation_type = pd.get(9, 0);
+    activation_params = pd.get(10, Mat());
 
     return 0;
 }
@@ -144,6 +148,54 @@ int DeconvolutionDepthWise::forward(const Mat& bottom_blob, Mat& top_blob, const
                     }
                 }
             }
+
+
+            if (activation_type == 1)
+            {
+                float* outptr = m;
+                int size = outw * outh;
+
+                for (int i = 0; i < size; i++)
+                {
+                    outptr[i] = std::max(outptr[i], 0.f);
+                }
+            }
+            else if (activation_type == 2)
+            {
+                float* outptr = m;
+                int size = outw * outh;
+                float slope = activation_params[0];
+
+                for (int i = 0; i < size; i++)
+                {
+                    outptr[i] = outptr[i] > 0.f ? outptr[i] : outptr[i] * slope;
+                }
+            }
+            else if (activation_type == 3)
+            {
+                float* outptr = m;
+                int size = outw * outh;
+                float min = activation_params[0];
+                float max = activation_params[1];
+
+                for (int i = 0; i < size; i++)
+                {
+                    if (outptr[i] < min)
+                        outptr[i] = min;
+                    if (outptr[i] > max)
+                        outptr[i] = max;
+                }
+            }
+            else if (activation_type == 4)
+            {
+                float* outptr = m;
+                int size = outw * outh;
+
+                for (int i = 0; i < size; i++)
+                {
+                    outptr[i] = 1.f / (1.f + exp(-outptr[i]));
+                }
+            }
         }
     }
     else
@@ -189,6 +241,53 @@ int DeconvolutionDepthWise::forward(const Mat& bottom_blob, Mat& top_blob, const
 
                             kptr += maxk;
                         }
+                    }
+                }
+
+                if (activation_type == 1)
+                {
+                    float* outptr = out;
+                    int size = outw * outh;
+
+                    for (int i = 0; i < size; i++)
+                    {
+                        outptr[i] = std::max(outptr[i], 0.f);
+                    }
+                }
+                else if (activation_type == 2)
+                {
+                    float* outptr = out;
+                    int size = outw * outh;
+                    float slope = activation_params[0];
+
+                    for (int i = 0; i < size; i++)
+                    {
+                        outptr[i] = outptr[i] > 0.f ? outptr[i] : outptr[i] * slope;
+                    }
+                }
+                else if (activation_type == 3)
+                {
+                    float* outptr = out;
+                    int size = outw * outh;
+                    float min = activation_params[0];
+                    float max = activation_params[1];
+
+                    for (int i = 0; i < size; i++)
+                    {
+                        if (outptr[i] < min)
+                            outptr[i] = min;
+                        if (outptr[i] > max)
+                            outptr[i] = max;
+                    }
+                }
+                else if (activation_type == 4)
+                {
+                    float* outptr = out;
+                    int size = outw * outh;
+
+                    for (int i = 0; i < size; i++)
+                    {
+                        outptr[i] = 1.f / (1.f + exp(-outptr[i]));
                     }
                 }
             }
